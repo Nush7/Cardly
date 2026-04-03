@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/ban-ts-comment */
 import { useState } from 'react';
-import { Upload, FileText, Wand2, Hash, Calendar, Sparkles, Zap } from 'lucide-react';
+import { FileText, Wand2, Hash, Calendar, Zap } from 'lucide-react';
 // import { generateQuiz } from '../api/quiz';
 import { QuizGenerationSuccess } from './QuizGenerationSuccess';
 import { generateQuiz } from '../api/quiz';
@@ -8,30 +9,9 @@ export const StudyBuilder = () => {
   const [content, setContent] = useState('');
   const [questionCount, setQuestionCount] = useState(10);
   const [validityDays, setValidityDays] = useState(30);
-  const [dragActive, setDragActive] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedQuiz, setGeneratedQuiz] = useState<any>(null);
 
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-      console.log('Files dropped:', files);
-    }
-  };
 
   const handleGenerate = async () => {
     if (!content.trim()) return;
@@ -87,9 +67,7 @@ export const StudyBuilder = () => {
     <div className="p-8 max-w-5xl mx-auto">
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-xl">
-            <Sparkles className="h-6 w-6 text-blue-400" />
-          </div>
+        
           <h1 className="text-4xl font-bold text-white">Study Builder</h1>
         </div>
         <p className="text-gray-400 text-lg">Transform your study material into interactive quiz cards with AI</p>
@@ -103,38 +81,10 @@ export const StudyBuilder = () => {
             Study Material
           </h2>
 
-          {/* File Upload Area */}
-          <div
-            className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-300 ${dragActive
-              ? 'border-blue-500 bg-blue-500/10'
-              : 'border-gray-700 hover:border-gray-600 hover:bg-gray-800/30'
-              }`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-          >
-            <div className="bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-2xl p-6 w-fit mx-auto mb-6">
-              <Upload className="h-12 w-12 text-blue-400 mx-auto" />
-            </div>
-            <p className="text-xl font-semibold text-white mb-2">
-              Drop your document here or click to browse
-            </p>
-            <p className="text-gray-400 mb-6">
-              Supports PDF, DOC, DOCX, TXT files up to 10MB
-            </p>
-            <button className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-3 rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all duration-300 font-semibold shadow-lg hover:shadow-blue-500/25">
-              Choose File
-            </button>
-          </div>
 
           {/* Text Area */}
           <div className="relative">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="flex-1 h-px bg-gray-700"></div>
-              <span className="text-gray-400 font-medium">or paste your content</span>
-              <div className="flex-1 h-px bg-gray-700"></div>
-            </div>
+           
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}

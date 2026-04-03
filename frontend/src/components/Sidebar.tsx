@@ -1,5 +1,5 @@
 import React from 'react';
-import { Brain, Plus, BookOpen, BarChart3, LogOut } from 'lucide-react';
+import {  Plus, BookOpen, BarChart3, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { DashboardView } from './Dashboard';
 
@@ -22,10 +22,7 @@ export const Sidebar = ({ activeView, onViewChange }: SidebarProps) => {
       {/* Logo */}
       <div className="p-6 border-b border-gray-800">
         <div className="flex items-center space-x-3">
-          <div className="relative">
-            <Brain className="h-8 w-8 text-blue-400" />
-            <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
-          </div>
+     
           <span className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
             CardCraft
           </span>
