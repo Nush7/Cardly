@@ -2,17 +2,20 @@
 // Best practice: Load environment variables at the entry point (e.g., index.ts or server.ts) using dotenv.
 // Only import and configure dotenv here if you are running this file directly (for testing/debugging),
 // otherwise, assume dotenv is loaded in the main entry point.
-if (process.env.NODE_ENV !== 'production' && !process.env.GEMINI_API_KEY) {
+if (process.env.NODE_ENV !== 'production' && !process.env.LLM_PROVIDER) {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     require('dotenv').config();
 }
 
 import { IQuizQuestion } from '../models/quiz.model';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import Cerebras from '@cerebras/cerebras_cloud_sdk';
 
 
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
+const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'gemini').toLowerCase();
 const MAX_TOKENS_PER_CHUNK = 6000; // Conservative limit for Gemini Pro
 const OVERLAP_SIZE = 300; // Overlap between chunks
 const MIN_CHUNK_SIZE = 500; // Minimum meaningful chunk size
@@ -23,22 +26,44 @@ interface TextChunk {
     wordCount: number;
 }
 
-// Initialize Gemini AI
-if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY not set in environment variables');
+interface CerebrasCompletion {
+    choices: Array<{
+        message: {
+            content: string;
+        };
+    }>;
 }
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-// Use "gemini-1.5-flash" as a fallback if "gemini-pro" is not available or causes errors
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
-const model = genAI.getGenerativeModel({
-    model: GEMINI_MODEL,
-    generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 2048,
-        topP: 0.8,
-        topK: 40
+
+// Initialize Gemini AI
+let genAI: GoogleGenerativeAI | null = null;
+let geminiModel: any = null;
+let cerebrasClient: Cerebras | null = null;
+
+if (LLM_PROVIDER === 'gemini') {
+    if (!GEMINI_API_KEY) {
+        throw new Error('GEMINI_API_KEY not set in environment variables');
     }
-});
+    genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+    geminiModel = genAI.getGenerativeModel({
+        model: GEMINI_MODEL,
+        generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 2048,
+            topP: 0.8,
+            topK: 40
+        }
+    });
+} else if (LLM_PROVIDER === 'cerebras') {
+    if (!CEREBRAS_API_KEY) {
+        throw new Error('CEREBRAS_API_KEY not set in environment variables');
+    }
+    cerebrasClient = new Cerebras({
+        apiKey: CEREBRAS_API_KEY
+    });
+} else {
+    throw new Error(`Invalid LLM_PROVIDER: ${LLM_PROVIDER}. Must be 'gemini' or 'cerebras'`);
+}
 
 // Function to estimate token count (rough approximation)
 const estimateTokens = (text: string): number => {
@@ -136,12 +161,12 @@ const parseGeminiResponse = (responseText: string): IQuizQuestion[] => {
         return questions;
     } catch (error) {
         const msg = (error instanceof Error && error.message) ? error.message : String(error);
-        throw new Error(`Failed to parse Gemini response: ${msg}`);
+        throw new Error(`Failed to parse response: ${msg}`);
     }
 };
 
 // Function to generate questions from a single chunk using Gemini SDK
-const generateQuestionsFromChunk = async (chunk: TextChunk, questionsPerChunk: number): Promise<IQuizQuestion[]> => {
+const generateQuestionsFromChunkGemini = async (chunk: TextChunk, questionsPerChunk: number): Promise<IQuizQuestion[]> => {
     const prompt = `
 You are an expert educator and assessment designer. 
 
@@ -170,7 +195,10 @@ ${chunk.content}
 `;
 
     try {
-        const result = await model.generateContent(prompt);
+        if (!geminiModel) {
+            throw new Error('Gemini model not initialized');
+        }
+        const result = await geminiModel.generateContent(prompt);
         const response = await result.response;
         const responseText = response.text();
 
@@ -181,11 +209,70 @@ ${chunk.content}
     }
 };
 
+// Function to generate questions from a single chunk using Cerebras SDK
+const generateQuestionsFromChunkCerebras = async (chunk: TextChunk, questionsPerChunk: number): Promise<IQuizQuestion[]> => {
+    const prompt = `
+You are an expert educator and assessment designer. 
+
+Generate EXACTLY ${questionsPerChunk} high-quality, clear, and unambiguous multiple-choice questions based on the following text chunk.
+
+REQUIREMENTS:
+- Each question must test important concepts or facts from the text
+- Questions should be original and not copied verbatim from the text
+- Each question must have exactly 4 plausible options (A, B, C, D)
+- Only one option should be correct
+- Include a detailed explanation for the correct answer
+- Tag each question with difficulty: "low", "medium", or "hard"
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON array with no additional text or formatting. Each object must have this exact structure:
+{
+  "questionText": "string",
+  "options": ["option A", "option B", "option C", "option D"],
+  "correctIndex": 0,
+  "explanation": "string",
+  "difficulty": "low"
+}
+
+TEXT CHUNK ${chunk.index + 1}:
+${chunk.content}
+`;
+
+    try {
+        if (!cerebrasClient) {
+            throw new Error('Cerebras client not initialized');
+        }
+        
+        const completion = (await cerebrasClient.chat.completions.create({
+            messages: [{ role: "user", content: prompt }],
+            model: 'llama3.1-8b',
+            max_completion_tokens: 2048,
+            temperature: 0.7,
+            top_p: 0.8,
+            stream: false
+        })) as CerebrasCompletion;
+
+        const responseText = completion.choices[0]?.message?.content || '';
+        if (!responseText) {
+            throw new Error('Empty response from Cerebras API');
+        }
+
+        return parseGeminiResponse(responseText);
+    } catch (error) {
+        const msg = (error instanceof Error && error.message) ? error.message : String(error);
+        throw new Error(`Cerebras API error for chunk ${chunk.index + 1}: ${msg}`);
+    }
+};
+
 // Main function to generate questions with chunking using Gemini SDK
 export const generateQuestionsWithLLM = async (text: string, numQuestions: number): Promise<IQuizQuestion[]> => {
     // Validation
-    if (!GEMINI_API_KEY) {
+    if (LLM_PROVIDER === 'gemini' && !GEMINI_API_KEY) {
         throw new Error('GEMINI_API_KEY not set in environment variables');
+    }
+    
+    if (LLM_PROVIDER === 'cerebras' && !CEREBRAS_API_KEY) {
+        throw new Error('CEREBRAS_API_KEY not set in environment variables');
     }
 
     if (!text || text.trim().length === 0) {
@@ -196,17 +283,16 @@ export const generateQuestionsWithLLM = async (text: string, numQuestions: numbe
         throw new Error('Number of questions must be positive');
     }
 
-    console.log(`Generating ${numQuestions} questions from text of ${text.length} characters`);
-
     try {
         const chunks = chunkText(text);
-        console.log(`Text split into ${chunks.length} chunks`);
 
         const allQuestions: IQuizQuestion[] = [];
 
         if (chunks.length === 1) {
             // Single chunk - generate all questions at once
-            const questions = await generateQuestionsFromChunk(chunks[0], numQuestions);
+            const questions = LLM_PROVIDER === 'gemini'
+                ? await generateQuestionsFromChunkGemini(chunks[0], numQuestions)
+                : await generateQuestionsFromChunkCerebras(chunks[0], numQuestions);
             allQuestions.push(...questions);
         } else {
             // Multiple chunks - distribute questions evenly
@@ -216,12 +302,14 @@ export const generateQuestionsWithLLM = async (text: string, numQuestions: numbe
                 const chunk = chunks[i];
                 const questionsNeeded = Math.min(questionsPerChunk, numQuestions - allQuestions.length);
 
-                if (questionsNeeded <= 0) break;
-
-                console.log(`Processing chunk ${i + 1}/${chunks.length} (${chunk.wordCount} words)`);
+                if (questionsNeeded <= 0) {
+                    break;
+                }
 
                 try {
-                    const chunkQuestions = await generateQuestionsFromChunk(chunk, questionsNeeded);
+                    const chunkQuestions = LLM_PROVIDER === 'gemini'
+                        ? await generateQuestionsFromChunkGemini(chunk, questionsNeeded)
+                        : await generateQuestionsFromChunkCerebras(chunk, questionsNeeded);
                     allQuestions.push(...chunkQuestions);
 
                     // Add delay between API calls to avoid rate limiting
@@ -242,8 +330,6 @@ export const generateQuestionsWithLLM = async (text: string, numQuestions: numbe
             .slice(0, numQuestions)
             .sort(() => Math.random() - 0.5); // Shuffle questions
 
-        console.log(`Successfully generated ${finalQuestions.length} questions`);
-
         if (finalQuestions.length === 0) {
             throw new Error('No questions were generated successfully');
         }
@@ -259,8 +345,12 @@ export const generateQuestionsWithLLM = async (text: string, numQuestions: numbe
 
 // Alternative simpler function for smaller texts (no chunking)
 export const generateQuestionsSimple = async (text: string, numQuestions: number): Promise<IQuizQuestion[]> => {
-    if (!GEMINI_API_KEY) {
+    if (LLM_PROVIDER === 'gemini' && !GEMINI_API_KEY) {
         throw new Error('GEMINI_API_KEY not set in environment variables');
+    }
+    
+    if (LLM_PROVIDER === 'cerebras' && !CEREBRAS_API_KEY) {
+        throw new Error('CEREBRAS_API_KEY not set in environment variables');
     }
 
     const prompt = `
@@ -288,13 +378,39 @@ ${text}
 `;
 
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const responseText = response.text();
+        if (LLM_PROVIDER === 'gemini') {
+            if (!geminiModel) {
+                throw new Error('Gemini model not initialized');
+            }
+            const result = await geminiModel.generateContent(prompt);
+            const response = await result.response;
+            const responseText = response.text();
 
-        return parseGeminiResponse(responseText);
+            return parseGeminiResponse(responseText);
+        } else if (LLM_PROVIDER === 'cerebras') {
+            if (!cerebrasClient) {
+                throw new Error('Cerebras client not initialized');
+            }
+            const completion = (await cerebrasClient.chat.completions.create({
+                messages: [{ role: "user", content: prompt }],
+                model: 'llama3.1-8b',
+                max_completion_tokens: 2048,
+                temperature: 0.7,
+                top_p: 0.8,
+                stream: false
+            })) as CerebrasCompletion;
+
+            const responseText = completion.choices[0]?.message?.content || '';
+            if (!responseText) {
+                throw new Error('Empty response from Cerebras API');
+            }
+
+            return parseGeminiResponse(responseText);
+        }
+
+        throw new Error(`Invalid LLM provider: ${LLM_PROVIDER}`);
     } catch (error) {
         const msg = (error instanceof Error && error.message) ? error.message : String(error);
-        throw new Error(`Gemini API error: ${msg}`);
+        throw new Error(`${LLM_PROVIDER} API error: ${msg}`);
     }
 };

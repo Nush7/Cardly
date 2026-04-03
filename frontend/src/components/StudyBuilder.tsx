@@ -42,18 +42,13 @@ export const StudyBuilder = () => {
       formData.append('numQuestions', questionCount.toString());
       const validUntil = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000).toISOString();
       formData.append('validUntil', validUntil);
-      console.log('Sending formData:', {
-        rawText: content,
-        numQuestions: questionCount,
-        validUntil
-      });
       const quiz = await generateQuiz(formData);
-      // Map backend response to expected frontend structure
+      // Use the response directly from backend
       setGeneratedQuiz({
-        slug: quiz.shareLink?.split('/quiz/')[1] || quiz.slug || quiz.quizId || '',
-        title: content.substring(0, 40) || 'Untitled Quiz',
-        questions: [], // Optionally fetch questions if needed
-        createdAt: new Date().toISOString(),
+        id: quiz.id,
+        title: quiz.title || content.substring(0, 40) || 'Untitled Quiz',
+        questions: quiz.questions || [],
+        createdAt: quiz.createdAt || new Date().toISOString(),
       });
     } catch (err) {
       console.error('Quiz generation error:', err);

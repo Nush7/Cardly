@@ -47,7 +47,14 @@ export const createQuiz = async (userId: string, {
         validUntil,
         theme,
     });
-    return { quizId: quiz._id, shareLink: `https://yourapp.com/quiz/${slug}` };
+    return { 
+        id: slug, 
+        quizId: quiz._id,
+        title: quiz.title,
+        questions: questions,
+        createdAt: new Date().toISOString(),
+        shareLink: `https://yourapp.com/quiz/${slug}` 
+    };
 };
 
 export const getQuizBySlugService = async (slug: string) => {
