@@ -29,7 +29,7 @@ if (!GEMINI_API_KEY) {
 }
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 // Use "gemini-1.5-flash" as a fallback if "gemini-pro" is not available or causes errors
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
 const model = genAI.getGenerativeModel({
     model: GEMINI_MODEL,
     generationConfig: {

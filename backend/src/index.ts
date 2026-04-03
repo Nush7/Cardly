@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
-import { json, urlencoded } from 'body-parser';
 import authRoutes from './routes/auth.routes';
 import quizRoutes from './routes/quiz.routes';
 import { errorHandler } from './middlewares/error.middleware';
@@ -21,8 +20,8 @@ app.use(cors({
     origin: 'http://localhost:5173',
     credentials: true
 }));
-app.use(json());
-app.use(urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
